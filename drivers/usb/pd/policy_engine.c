@@ -24,6 +24,10 @@
 #include <linux/usb/usbpd.h>
 #include "usbpd.h"
 
+#ifdef CONFIG_UCI_NOTIFICATIONS
+#include <linux/notification/notification.h>
+#endif
+
 #ifdef OPLUS_FEATURE_CHG_BASIC
 /* To start USB stack for USB3.1 compliance testing */
 static bool usb_compliance_mode;
@@ -3928,6 +3932,23 @@ static int psy_changed(struct notifier_block *nb, unsigned long evt, void *ptr)
 
 	typec_mode = val.intval;
 
+#ifdef CONFIG_UCI_NOTIFICATIONS
+	switch (typec_mode) {
+		case POWER_SUPPLY_TYPEC_NONE:
+			if (!pd->in_pr_swap) {
+				ntf_set_charge_state(false);
+			}
+		break;
+		/* Sink states */
+		case POWER_SUPPLY_TYPEC_SOURCE_DEFAULT:
+		case POWER_SUPPLY_TYPEC_SOURCE_MEDIUM:
+		case POWER_SUPPLY_TYPEC_SOURCE_HIGH:
+			ntf_set_charge_state(true);
+		break;
+		default:
+		break;
+	}
+#endif
 	ret = power_supply_get_property(pd->usb_psy,
 			POWER_SUPPLY_PROP_PE_START, &val);
 	if (ret) {

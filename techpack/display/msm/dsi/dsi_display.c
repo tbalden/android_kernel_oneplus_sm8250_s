@@ -60,6 +60,13 @@ __attribute__((weak)) void lcd_tp_refresh_switch(int fps)
 extern struct oplus_te_refcount te_refcount;
 #endif
 
+#ifdef CONFIG_UCI
+#include <linux/uci/uci.h>
+#endif
+#ifdef CONFIG_UCI_NOTIFICATIONS_SCREEN_CALLBACKS
+#include <linux/notification/notification.h>
+#endif
+
 /* Add for solve sau issue*/
 extern int lcd_closebl_flag;
 /* Add for fingerprint silence*/
@@ -246,6 +253,55 @@ extern int oplus_display_panel_get_id2(void);
 static int readcount = 0;
 #endif
 
+#ifdef CONFIG_UCI
+static bool screen_is_on = false;
+static int backlight_min = 6;
+static bool backlight_dimmer = false;
+static u32 last_brightness;
+static bool first_brightness_set = false;
+struct drm_connector *primary_connector = NULL;
+
+
+/*
+maxX = 1084
+minX = 65
+minX2 = 6
+
+minXDiff = minX-minX2 = 60
+
+percentage = ((maxX - bl_lvl)) * 100) / maxX    (0% at max brightness, 100% at min)
+calcDiff = minXDiff * percentage (at min 60, at max 0, in the middle lvl 30)
+*/
+static int MAX_BL_LVL = 1084; // op8/pro values
+static int MIN_BL_LVL = 65;
+static bool lvls_set = false;
+
+static u64 calc_bl_dimming(u64 bl_lvl) {
+	if (!lvls_set)
+	{
+		if (uci_get_hw_version()==OP8T) {
+			pr_info("%s op8t detected, going with min bl lvl 30\n",__func__);
+			MAX_BL_LVL = 2047;
+			MIN_BL_LVL = 9;
+		}
+		lvls_set = true;
+	}
+	{
+	int percentage = ((MAX_BL_LVL - bl_lvl) * 100)/ MAX_BL_LVL;
+	if (percentage>=95) percentage = 100; // round up to 100%
+	int minXDiff = MIN_BL_LVL - backlight_min;
+	int calcDiff = (minXDiff * percentage) / 100;
+	u64 ret = bl_lvl - calcDiff;
+	if (percentage <=0) ret = bl_lvl; // MAX_BL_LVL is not correct in code, let's keep original lvl
+	if (minXDiff <= 0) ret = bl_lvl; // backlight_min is higher than MIN_BL_LVL! let's keep original lvl, don't boost it
+	if (ret>bl_lvl) ret = bl_lvl; // miscalc, set back to bl_lvl, like for AOD bl_lvl can be under the normal MIN BL LVL
+	pr_info("%s [cleanslate] backlight dimmer calc: MIN_BL_LVL: %d - orig: %u percentage: %d minXDiff: %d calcdiff: %d result_lvl: %u\n",__func__, MIN_BL_LVL, bl_lvl, percentage, minXDiff, calcDiff, ret);
+	return ret;
+	}
+}
+
+#endif
+
 int dsi_display_set_backlight(struct drm_connector *connector,
 		void *display, u32 bl_lvl)
 {
@@ -354,6 +410,29 @@ error:
 #endif /* OPLUS_BUG_STABILITY */
 	return rc;
 }
+
+#ifdef CONFIG_UCI
+static void uci_user_listener(void) {
+        {
+                bool change = false;
+                int on = backlight_dimmer?1:0;
+                int backlight_min_curr = backlight_min;
+
+                backlight_min = uci_get_user_property_int_mm("backlight_min", backlight_min, 3, 45);
+                on = !!uci_get_user_property_int_mm("backlight_dimmer", on, 0, 1);
+
+                if (on != backlight_dimmer || backlight_min_curr != backlight_min) change = true;
+
+                backlight_dimmer = on;
+
+                if (first_brightness_set && change) {
+			if (primary_display != NULL && primary_connector != NULL && screen_is_on) {
+				dsi_display_set_backlight(primary_connector,primary_display, last_brightness);
+			}
+                }
+        }
+}
+#endif
 
 #ifndef OPLUS_BUG_STABILITY
 static int dsi_display_cmd_engine_enable(struct dsi_display *display)
@@ -8001,6 +8080,13 @@ wait_failure:
 		mutex_unlock(&display->display_lock);
 	}
 
+#ifdef CONFIG_UCI
+	if (primary_display!=NULL && primary_connector == NULL) {
+		if (primary_display == display) {
+			primary_connector = connector;
+		}
+	}
+#endif
 	return rc;
 }
 
@@ -8612,6 +8698,9 @@ static int __init dsi_display_register(void)
 	dsi_ctrl_drv_register();
 
 	dsi_display_parse_boot_display_selection();
+#ifdef CONFIG_UCI
+	uci_add_user_listener(uci_user_listener);
+#endif
 
 	return platform_driver_register(&dsi_display_driver);
 }
