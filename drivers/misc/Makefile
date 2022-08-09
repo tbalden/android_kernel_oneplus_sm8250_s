@@ -90,6 +90,9 @@ obj-$(CONFIG_AW8697_HAPTIC)     += aw8697_haptic/
 
 obj-$(CONFIG_FPR_FPC)		+= fpr_FingerprintCard/
 
+obj-$(CONFIG_UCI)  += uci/
+obj-$(CONFIG_UCI_NOTIFICATIONS)  += notification/
+obj-y  += inputfilter/
 #ifdef OPLUS_FEATURE_RF_CABLE_DETECT
 obj-$(CONFIG_OPLUS_RF_CABLE_MONITOR)	+= oplus_rf_cable_monitor.o
 obj-$(CONFIG_OPLUS_RF_CABLE_MONITOR) += op_ant_detect.o
